@@ -8,6 +8,7 @@ import os
 print("Starting FastAPI application...")
 # Initialize FastAPI
 app = FastAPI()
+#
 
 # Boto3 clients
 ssm_client = boto3.client('ssm', region_name='us-east-1')
