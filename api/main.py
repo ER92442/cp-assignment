@@ -4,7 +4,6 @@ from datetime import datetime
 import boto3
 import os
 
-
 print("Starting FastAPI application...")
 # Initialize FastAPI
 app = FastAPI()
