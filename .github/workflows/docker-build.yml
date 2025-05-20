@@ -4,8 +4,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'api/**'
-      - 'backend/**'
+      - 'services/**'
   workflow_dispatch:
 
 jobs:
@@ -32,12 +31,12 @@ jobs:
           services=()
           
           # Check for changes in the "api" directory
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q ^api/; then
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q ^services/api/; then
           services+=("api")
           fi
           
           # Check for changes in the "backend" directory
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q ^backend/; then
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q ^services/backend/; then
           services+=("backend")
           fi
           
@@ -47,6 +46,7 @@ jobs:
 
       - name: Build and Push Docker Images
         run: |
+          cd services
           for service in ${{ env.services }}; do
             echo "Building and pushing Docker image for $service"
             docker build -t ${{ secrets.DOCKER_USERNAME }}/$service:latest ./$service
