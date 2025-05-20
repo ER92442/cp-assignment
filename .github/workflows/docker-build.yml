@@ -1,0 +1,45 @@
+name: Build and Push Multiple Docker Images
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'api/**'
+      - 'backend/**'
+  workflow_dispatch:
+
+jobs:
+  build-image:
+    name: Build & Push 
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Identify which service to build
+        id: service
+        run: |
+          # add the service name to the services array if it exists in the path
+          services=()
+          if [[ "${{ github.event.head_commit.message }}" == *"api"* ]]; then
+            services+=("api")
+          fi
+          if [[ "${{ github.event.head_commit.message }}" == *"backend"* ]]; then
+            services+=("backend")
+          fi
+          echo "services=${services[@]}" >> $GITHUB_ENV
+
+      - name: Build and Push Docker Images
+        run: |
+          for service in ${{ env.services }}; do
+            echo "Building and pushing Docker image for $service"
+            docker build -t ${{ secrets.DOCKER_USERNAME }}/$service:latest ./$service
+            docker push ${{ secrets.DOCKER_USERNAME }}/$service:latest
+          done
