@@ -26,14 +26,20 @@ jobs:
       - name: Identify which service to build
         id: service
         run: |
-          # add the service name to the services array if it exists in the path
+          # Initialize an empty array for services
           services=()
-          if [[ "${{ github.event.head_commit.message }}" == *"api"* ]]; then
-            services+=("api")
+          
+          # Check for changes in the "api" directory
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^api/'; then
+          services+=("api")
           fi
-          if [[ "${{ github.event.head_commit.message }}" == *"backend"* ]]; then
-            services+=("backend")
+          
+          # Check for changes in the "backend" directory
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^backend/'; then
+          services+=("backend")
           fi
+          
+          # Export the services array to the environment
           echo "services=${services[@]}" >> $GITHUB_ENV
           echo "Services: ${services[@]}"
 
