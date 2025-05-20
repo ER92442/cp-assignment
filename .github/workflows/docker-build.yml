@@ -23,7 +23,7 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Identify which service to build
+            - name: Identify which service to build
         id: service
         run: |
           # add the service name to the services array if it exists in the path
@@ -35,6 +35,7 @@ jobs:
             services+=("backend")
           fi
           echo "services=${services[@]}" >> $GITHUB_ENV
+          echo "Services: ${services[@]}"
 
       - name: Build and Push Docker Images
         run: |
