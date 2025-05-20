@@ -8,11 +8,11 @@ WORKDIR /app
 RUN pip install --no-cache-dir boto3
 
 # Copy the microservice code
-COPY sqs_to_s3.py .
+COPY main.py .
 
 # Default environment variables (can be overridden by docker run or cloud env)
 ENV POLL_INTERVAL_SECONDS=10
 
 # Run the microservice
-CMD ["python", "sqs_to_s3.py"]
+CMD ["python", "main.py"]
 
