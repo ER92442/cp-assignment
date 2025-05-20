@@ -34,15 +34,16 @@ jobs:
           if [[ "${{ github.event.head_commit.message }}" == *"backend"* ]]; then
             services+=("backend")
           fi
+          echo "services=${services[@]}" >> $GITHUB_ENV
 
-      
       - name: Build and Push Docker Images
         run: |
-          for service in "${services[@]}"; do
+          for service in ${{ env.services }}; do
             echo "Building and pushing Docker image for $service"
             docker build -t ${{ secrets.DOCKER_USERNAME }}/$service:latest ./$service
             docker push ${{ secrets.DOCKER_USERNAME }}/$service:latest
           done
+      
 
       # - name: Build and Push
       #   uses: docker/build-push-action@v5
