@@ -30,12 +30,12 @@ jobs:
           services=()
           
           # Check for changes in the "api" directory
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^api/'; then
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q ^api/; then
           services+=("api")
           fi
           
           # Check for changes in the "backend" directory
-          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q '^backend/'; then
+          if git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep -q ^backend/; then
           services+=("backend")
           fi
           
