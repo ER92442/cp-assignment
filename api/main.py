@@ -65,5 +65,7 @@ async def receive_email(req: EmailRequest):
     return {"message": "Message forwarded to SQS successfully"}
 
 if __name__ == "__main__":
+    #minor change to trigger workflow
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    
