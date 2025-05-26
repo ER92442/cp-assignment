@@ -16,24 +16,25 @@ resource "aws_s3_bucket" "microservice_data" {
   bucket = "microservice-data"
 }
 
-
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
-  version = ">= 3.0"
+  version = ">= 5.0"
 
-  name = "simple-vpc"           # Friendly name for the VPC and related resources
-  cidr = "10.0.0.0/16"          # IP range for the VPC
+  name = "simple-vpc"
+  cidr = "10.0.0.0/16"
 
-  azs             = ["us-east-1a", "us-east-1b"] # Availability zones for subnets
-  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24"] # Subnets open to the internet
+  azs             = ["us-east-1a" , "us-east-1b"]
+  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24"]
 
-  enable_nat_gateway = false   # No NAT gateway needed as we only have public subnets
-  enable_dns_hostnames = true  # Needed for ECS to resolve hostnames
-
+  enable_nat_gateway = false
+  enable_vpn_gateway = false
+  create_igw = true 
+  
+  enable_dns_hostnames = true
+  enable_dns_support = true
   map_public_ip_on_launch = true
+  
 }
-
-
 
 resource "aws_security_group" "elb_sg" {
   name        = "elb-sg"
@@ -56,7 +57,6 @@ resource "aws_security_group" "elb_sg" {
     cidr_blocks      = ["0.0.0.0/0"]
   }
 }
-
 
 resource "aws_security_group" "ecs_sg" {
   name        = "ecs-instance-sg"
@@ -87,6 +87,24 @@ resource "aws_security_group" "ecs_sg" {
     security_groups = [aws_security_group.elb_sg.id]
   }
 
+  # ADD: Allow HTTPS outbound for Docker Hub, ECR, SSM
+  egress {
+    description = "HTTPS outbound"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  # ADD: Allow HTTP outbound
+  egress {
+    description = "HTTP outbound"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -97,33 +115,32 @@ resource "aws_security_group" "ecs_sg" {
 
 resource "aws_elb" "main" {
   name               = "simple-elb"
-  internal           = false                  # Internet-facing ELB
+  internal           = false
   security_groups    = [aws_security_group.elb_sg.id]
   subnets            = module.vpc.public_subnets
 
   listener {
-    instance_port     = 8000                      # Port on ECS task/container
+    instance_port     = 8000
     instance_protocol = "http"
-    lb_port           = 80                      # Port on the ELB
+    lb_port           = 80
     lb_protocol       = "http"
   }
 
   health_check {
     target              = "HTTP:8000/"
-    interval            = 30                     # Time between health checks
-    timeout             = 5                      # Time to wait for a response
-    healthy_threshold   = 2                      # Number of successes before healthy
-    unhealthy_threshold = 2                      # Number of failures before unhealthy
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 2
   }
 
-  cross_zone_load_balancing = true               # Distribute load evenly across AZs
-  idle_timeout               = 60                 # Connection idle timeout in seconds
+  cross_zone_load_balancing = true
+  idle_timeout               = 60
 
   tags = {
     Name = "simple-elb"
   }
 }
-
 
 module "ecs_cluster" {
   source = "terraform-aws-modules/ecs/aws"
@@ -159,18 +176,17 @@ module "ecs_cluster" {
       container_definitions = {
         api = {
           network_mode = "bridge"
-          image     = "er92442/api:latest"                       
-          essential = true                               
+          image     = "er92442/api:latest"
+          essential = true
           port_mappings = [
             {
               name          = "api"
               containerPort = 8000
               hostPort      = 8000
-              
               protocol      = "tcp"
             }
           ]
-          enable_cloudwatch_logging              = true
+          enable_cloudwatch_logging = true
         }
       }
       load_balancer = {
@@ -182,24 +198,6 @@ module "ecs_cluster" {
       }
       subnet_ids = module.vpc.public_subnets
     }
-  }
-}
-
-#launch template for the autoscaling group
-resource "aws_launch_template" "ecs_instance" {
-  name_prefix   = "ecs-instance-"
-  image_id      = data.aws_ssm_parameter.ecs_ami.value
-  instance_type = "t3.micro"
-
-  iam_instance_profile {
-    name = "ecs-instance-role-ex_1"
-  }
-
-  user_data = base64encode("echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config && echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config && systemctl restart ecs")
-
-  network_interfaces {
-    associate_public_ip_address = true
-    security_groups             = [aws_security_group.ecs_sg.id]
   }
 }
 
@@ -221,14 +219,21 @@ module "autoscaling" {
   min_size            = 1
   max_size            = 1
   desired_capacity    = 1
-  # security_groups = [aws_security_group.ecs_sg.id]
 
   create_iam_instance_profile = true
-  create_launch_template = true
-  launch_template_id = aws_launch_template.ecs_instance.id
-  launch_template_version = "$Latest"
   iam_role_name               = "ecs-instance-role-${each.key}"
-  user_data = base64encode("echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config && echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config && systemctl restart ecs")
+  
+  # FIXED: Proper user data with better ECS config
+  user_data = base64encode(<<-EOF
+    #!/bin/bash
+    echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config
+    echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config
+    echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config
+    systemctl restart ecs
+    yum update -y
+    EOF
+  )
+  
   iam_role_policies = {
     AmazonEC2ContainerServiceforEC2Role = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
     AmazonSSMManagedInstanceCore        = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -236,6 +241,7 @@ module "autoscaling" {
     AmazonSQSFullAccess                 = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
     SecretsManagerReadWrite             = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
   }
+  
   network_interfaces = [
     {
       delete_on_termination       = true
@@ -245,7 +251,6 @@ module "autoscaling" {
     }
   ]
 }
-
 
 data "aws_ssm_parameter" "ecs_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
