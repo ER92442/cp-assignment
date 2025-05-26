@@ -29,6 +29,8 @@ module "vpc" {
 
   enable_nat_gateway = false   # No NAT gateway needed as we only have public subnets
   enable_dns_hostnames = true  # Needed for ECS to resolve hostnames
+
+  map_public_ip_on_launch = true
 }
 
 
@@ -62,9 +64,25 @@ resource "aws_security_group" "ecs_sg" {
   vpc_id      = module.vpc.vpc_id
 
   ingress {
-    description = "Allow traffic from ELB"
-    from_port   = 8000 
-    to_port     = 8000 
+    description = "Allow traffic from ELB on port 8000"
+    from_port   = 8000
+    to_port     = 8000
+    protocol    = "tcp"
+    security_groups = [aws_security_group.elb_sg.id]
+  }
+
+  ingress {
+    description = "Allow traffic from ELB on port 80"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    security_groups = [aws_security_group.elb_sg.id]
+  }
+
+  ingress {
+    description = "Allow traffic from ELB on port 443"
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     security_groups = [aws_security_group.elb_sg.id]
   }
@@ -128,7 +146,7 @@ module "ecs_cluster" {
     api = {
       name = "api"
       desired_count   = 1
-      launch_type     = "EC2" #can be removed
+      launch_type     = "EC2" 
       network_mode    = "bridge"
       requires_compatibilities = ["EC2"] 
        
@@ -167,9 +185,27 @@ module "ecs_cluster" {
   }
 }
 
+#launch template for the autoscaling group
+resource "aws_launch_template" "ecs_instance" {
+  name_prefix   = "ecs-instance-"
+  image_id      = data.aws_ssm_parameter.ecs_ami.value
+  instance_type = "t3.micro"
+
+  iam_instance_profile {
+    name = "ecs-instance-role-ex_1"
+  }
+
+  user_data = base64encode("echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config && echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config && systemctl restart ecs")
+
+  network_interfaces {
+    associate_public_ip_address = true
+    security_groups             = [aws_security_group.ecs_sg.id]
+  }
+}
+
 module "autoscaling" {
   source  = "terraform-aws-modules/autoscaling/aws"
-  version = "~> 7.0"
+  version = "~> 8.0"
   for_each = {
     ex_1 = {
       instance_type              = "t3.micro"
@@ -179,17 +215,20 @@ module "autoscaling" {
   }
   name = "autoscaling-group-${each.key}"
   image_id = data.aws_ssm_parameter.ecs_ami.value
-
   instance_type = each.value.instance_type
   vpc_zone_identifier = module.vpc.public_subnets
   health_check_type   = "EC2"
   min_size            = 1
   max_size            = 1
   desired_capacity    = 1
-  security_groups = [aws_security_group.ecs_sg.id]
-  user_data = base64encode("echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config")
+  # security_groups = [aws_security_group.ecs_sg.id]
+
   create_iam_instance_profile = true
+  create_launch_template = true
+  launch_template_id = aws_launch_template.ecs_instance.id
+  launch_template_version = "$Latest"
   iam_role_name               = "ecs-instance-role-${each.key}"
+  user_data = base64encode("echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config && echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config && systemctl restart ecs")
   iam_role_policies = {
     AmazonEC2ContainerServiceforEC2Role = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
     AmazonSSMManagedInstanceCore        = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -197,6 +236,14 @@ module "autoscaling" {
     AmazonSQSFullAccess                 = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
     SecretsManagerReadWrite             = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
   }
+  network_interfaces = [
+    {
+      delete_on_termination       = true
+      device_index                = 0
+      associate_public_ip_address = true
+      security_groups             = [aws_security_group.ecs_sg.id]
+    }
+  ]
 }
 
 
