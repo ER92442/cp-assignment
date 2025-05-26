@@ -7,7 +7,6 @@ import os
 print("Starting FastAPI application...")
 # Initialize FastAPI
 app = FastAPI()
-#
 
 # Boto3 clients
 ssm_client = boto3.client('ssm', region_name='us-east-1')
@@ -44,6 +43,7 @@ def get_valid_token() -> str:
 # Main route
 @app.post("/send")
 async def receive_email(req: EmailRequest):
+    print("Received request:", req)
     # Step 1: Validate token
     valid_token = get_valid_token()
     if req.token != valid_token:
@@ -66,6 +66,7 @@ async def receive_email(req: EmailRequest):
 
 if __name__ == "__main__":
     ##minor change to trigger  workflow
+    print("Starting FastAPI application...") 
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
     

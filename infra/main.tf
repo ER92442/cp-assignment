@@ -2,12 +2,10 @@ provider "aws" {
   region = "us-east-1"
 }
 
-# --- Create SQS Queue ---
 resource "aws_sqs_queue" "email_queue" {
   name = "email-queue"
 }
 
-# --- Create SSM Parameter (token) ---
 resource "aws_ssm_parameter" "auth_token" {
   name  = "/auth/token"
   type  = "SecureString"
@@ -18,9 +16,7 @@ resource "aws_s3_bucket" "microservice_data" {
   bucket = "microservice-data"
 }
 
-# --------------------------
-# VPC MODULE - creates a basic VPC with public subnets and internet gateway
-# --------------------------
+
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
   version = ">= 3.0"
@@ -35,16 +31,8 @@ module "vpc" {
   enable_dns_hostnames = true  # Needed for ECS to resolve hostnames
 }
 
-# --------------------------
-# ECS CLUSTER - logical grouping of ECS tasks/services
-# --------------------------
-resource "aws_ecs_cluster" "main" {
-  name = "simple-ecs-cluster"  # Name of the ECS cluster
-}
 
-# --------------------------
-# SECURITY GROUP - allows inbound traffic to the ELB on port 80 (HTTP)
-# --------------------------
+
 resource "aws_security_group" "elb_sg" {
   name        = "elb-sg"
   description = "Allow HTTP inbound to ELB"
@@ -67,9 +55,28 @@ resource "aws_security_group" "elb_sg" {
   }
 }
 
-# --------------------------
-# CLASSIC ELB - load balances traffic to ECS tasks
-# --------------------------
+
+resource "aws_security_group" "ecs_sg" {
+  name        = "ecs-instance-sg"
+  description = "Allow traffic from ELB"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    description = "Allow traffic from ELB"
+    from_port   = 8000 
+    to_port     = 8000 
+    protocol    = "tcp"
+    security_groups = [aws_security_group.elb_sg.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
 resource "aws_elb" "main" {
   name               = "simple-elb"
   internal           = false                  # Internet-facing ELB
@@ -77,10 +84,18 @@ resource "aws_elb" "main" {
   subnets            = module.vpc.public_subnets
 
   listener {
-    instance_port     = 80                      # Port on ECS task/container
+    instance_port     = 8000                      # Port on ECS task/container
     instance_protocol = "http"
     lb_port           = 80                      # Port on the ELB
     lb_protocol       = "http"
+  }
+
+  health_check {
+    target              = "HTTP:8000/"
+    interval            = 30                     # Time between health checks
+    timeout             = 5                      # Time to wait for a response
+    healthy_threshold   = 2                      # Number of successes before healthy
+    unhealthy_threshold = 2                      # Number of failures before unhealthy
   }
 
   cross_zone_load_balancing = true               # Distribute load evenly across AZs
@@ -91,72 +106,100 @@ resource "aws_elb" "main" {
   }
 }
 
-# --------------------------
-# TASK DEFINITION - defines container specs for ECS
-# --------------------------
-resource "aws_ecs_task_definition" "simple_task" {
-  family                   = "simple-task"               # Task family name
-  network_mode             = "bridge"                    # Docker default networking mode
-  requires_compatibilities = ["EC2"]                     # EC2 launch type (not Fargate)
 
-  container_definitions = jsonencode([
-    {
-      name      = "api"                               # Container name
-      image     = "er92442/api:latest"                        # Container image (NGINX server)
-      essential = true                                  # Mark as essential container
+module "ecs_cluster" {
+  source = "terraform-aws-modules/ecs/aws"
+  cluster_name = "my-app"
+  default_capacity_provider_use_fargate = false
 
-      memory    = 256 
-      cpu       = 256                                   # CPU units for the container
-
-      portMappings = [
-        {
-          containerPort = 80                             # Port inside container
-          hostPort      = 80                             # Port on EC2 instance (same as ELB instance port)
-          protocol      = "tcp"
-        }
-      ]
+  autoscaling_capacity_providers = {
+    ex_1 = {
+      auto_scaling_group_arn         = module.autoscaling["ex_1"].autoscaling_group_arn
+      managed_scaling = {
+        maximum_scaling_step_size = 5
+        minimum_scaling_step_size = 1
+        status                    = "ENABLED"
+        target_capacity           = 60
+      }
     }
-  ])
-}
-
-# --------------------------
-# ECS SERVICE - runs and manages the task behind ELB
-# --------------------------
-resource "aws_ecs_service" "simple_service" {
-  name            = "simple-service"
-  cluster         = aws_ecs_cluster.main.id
-  task_definition = aws_ecs_task_definition.simple_task.arn
-  desired_count   = 1                              # Number of tasks to run
-
-  launch_type     = "EC2"                          # Use EC2 launch (not Fargate)
-  
-  load_balancer {
-    elb_name        = aws_elb.main.name           # Attach ECS service to ELB
-    container_name  = "api"                      # Container name in task definition
-    container_port  = 80                           # Port to route traffic
   }
 
-  deployment_minimum_healthy_percent = 50         # Minimum healthy during deployment
-  deployment_maximum_percent         = 200        # Max percentage during deployment
-
-  lifecycle {
-    create_before_destroy = true
+  services = {
+    api = {
+      name = "api"
+      desired_count   = 1
+      launch_type     = "EC2" #can be removed
+      network_mode    = "bridge"
+      requires_compatibilities = ["EC2"] 
+       
+      capacity_provider_strategy = [
+      {
+        capacity_provider = "ex_1"
+        weight            = 1
+      }
+      ]
+      container_definitions = {
+        api = {
+          network_mode = "bridge"
+          image     = "er92442/api:latest"                       
+          essential = true                               
+          port_mappings = [
+            {
+              name          = "api"
+              containerPort = 8000
+              hostPort      = 8000
+              
+              protocol      = "tcp"
+            }
+          ]
+          enable_cloudwatch_logging              = true
+        }
+      }
+      load_balancer = {
+        service = {
+          container_name   = "api"
+          container_port   = 8000
+          elb_name         = aws_elb.main.name
+        }
+      }
+      subnet_ids = module.vpc.public_subnets
+    }
   }
-
-  depends_on = [ 
-    aws_ecs_task_definition.simple_task
-  ]
-   
-
-  # ECS service must be in subnets that the ELB targets via EC2 instances
-  # Here, instances need to be in the VPC public subnets to receive traffic from ELB
 }
 
-# --------------------------
-# NOTE: ECS EC2 Instances (ECS Container Instances)
-# --------------------------
-# This example assumes you already have or will manually launch EC2 instances with ECS agent
-# registered to the cluster in the public subnets (with security group allowing inbound from ELB).
-# For simplicity, this example does not automate EC2 instances or autoscaling group.
+module "autoscaling" {
+  source  = "terraform-aws-modules/autoscaling/aws"
+  version = "~> 7.0"
+  for_each = {
+    ex_1 = {
+      instance_type              = "t3.micro"
+      use_mixed_instances_policy = false
+      mixed_instances_policy     = {}
+    }
+  }
+  name = "autoscaling-group-${each.key}"
+  image_id = data.aws_ssm_parameter.ecs_ami.value
+
+  instance_type = each.value.instance_type
+  vpc_zone_identifier = module.vpc.public_subnets
+  health_check_type   = "EC2"
+  min_size            = 1
+  max_size            = 1
+  desired_capacity    = 1
+  security_groups = [aws_security_group.ecs_sg.id]
+  user_data = base64encode("echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config")
+  create_iam_instance_profile = true
+  iam_role_name               = "ecs-instance-role-${each.key}"
+  iam_role_policies = {
+    AmazonEC2ContainerServiceforEC2Role = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+    AmazonSSMManagedInstanceCore        = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+    AmazonS3FullAccess                  = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+    AmazonSQSFullAccess                 = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+    SecretsManagerReadWrite             = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+  }
+}
 
 
+data "aws_ssm_parameter" "ecs_ami" {
+  name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
+}
