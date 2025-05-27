@@ -17,8 +17,8 @@ S3_UPLOAD_PATH = os.getenv("S3_UPLOAD_PATH", "uploads/")
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "10"))
 
 # Initialize boto3 clients
-sqs_client = boto3.client('sqs')
-s3_client = boto3.client('s3')
+sqs_client = boto3.client('sqs', region_name='us-east-1')
+s3_client = boto3.client('s3' , region_name='us-east-1')    
 
 def upload_message_to_s3(message_body, message_id):
     try:
