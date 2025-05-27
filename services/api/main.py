@@ -40,6 +40,11 @@ def get_valid_token() -> str:
     response = ssm_client.get_parameter(Name=SSM_PARAM_NAME, WithDecryption=True)
     return response['Parameter']['Value']
 
+@app.get("/health")
+async def health_check():
+    return {"status": "ok"}
+
+
 # Main route
 @app.post("/")
 async def receive_email(req: EmailRequest):

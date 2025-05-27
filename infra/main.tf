@@ -127,11 +127,11 @@ resource "aws_elb" "main" {
   }
 
   health_check {
-    target              = "HTTP:8000/"
+    target              = "HTTP:8000/health"
     interval            = 30
-    timeout             = 5
-    healthy_threshold   = 2
-    unhealthy_threshold = 2
+    timeout             = 60
+    healthy_threshold   = 3
+    unhealthy_threshold = 3
   }
 
   cross_zone_load_balancing = true
@@ -146,6 +146,15 @@ module "ecs_cluster" {
   source = "terraform-aws-modules/ecs/aws"
   cluster_name = "my-app"
   default_capacity_provider_use_fargate = false
+  # create_task_exec_iam_role = true
+  # task_exec_iam_role_name = "ecs-task-execution-role"
+  # task_exec_iam_role_policies = {
+  #   AmazonECSTaskExecutionRolePolicy = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+  #   AmazonS3FullAccess                = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+  #   AmazonSQSFullAccess               = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+  #   SecretsManagerReadWrite           = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+  # }
+
 
   autoscaling_capacity_providers = {
     ex_1 = {
@@ -166,7 +175,9 @@ module "ecs_cluster" {
       launch_type     = "EC2" 
       network_mode    = "bridge"
       requires_compatibilities = ["EC2"] 
-       
+      memory = 512
+      cpu    = 256
+      
       capacity_provider_strategy = [
       {
         capacity_provider = "ex_1"
@@ -177,6 +188,7 @@ module "ecs_cluster" {
         api = {
           network_mode = "bridge"
           image     = "er92442/api:latest"
+          cpu       = 256
           essential = true
           port_mappings = [
             {
@@ -196,6 +208,15 @@ module "ecs_cluster" {
           elb_name         = aws_elb.main.name
         }
       }
+
+      # create iam role for ECS tasks
+      task_role_policies = {
+        AmazonSQSFullAccess = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+        AmazonS3FullAccess  = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        SecretsManagerReadWrite = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+      }
+      task_role_name = "ecs-task-role-api"
+      task_execution_role_name = "ecs-task-execution-role-api"
       subnet_ids = module.vpc.public_subnets
     }
   }
@@ -206,31 +227,35 @@ module "autoscaling" {
   version = "~> 8.0"
   for_each = {
     ex_1 = {
-      instance_type              = "t3.micro"
+      instance_type              = "t2.micro"
       use_mixed_instances_policy = false
       mixed_instances_policy     = {}
     }
   }
   name = "autoscaling-group-${each.key}"
-  image_id = data.aws_ssm_parameter.ecs_ami.value
+  image_id = "ami-03afdcc08c89cd0b8" #data.aws_ssm_parameter.ecs_ami.value
   instance_type = each.value.instance_type
   vpc_zone_identifier = module.vpc.public_subnets
   health_check_type   = "EC2"
   min_size            = 1
-  max_size            = 1
+  max_size            = 3
   desired_capacity    = 1
 
   create_iam_instance_profile = true
   iam_role_name               = "ecs-instance-role-${each.key}"
   
-  # FIXED: Proper user data with better ECS config
   user_data = base64encode(<<-EOF
     #!/bin/bash
-    echo ECS_CLUSTER=my-app >> /etc/ecs/ecs.config
+    echo "Starting ECS Agent setup..." >> /var/log/my-user-data.log
+    echo ECS_CLUSTER=${module.ecs_cluster.cluster_name} >> /etc/ecs/ecs.config
     echo ECS_ENABLE_TASK_IAM_ROLE=true >> /etc/ecs/ecs.config
     echo ECS_ENABLE_CONTAINER_METADATA=true >> /etc/ecs/ecs.config
-    systemctl restart ecs
+    echo ECS_LOGLEVEL=debug >> /etc/ecs/ecs.config
     yum update -y
+    echo "running Docker container..." >> /var/log/my-user-data.log
+
+    sudo docker run --rm   --name ecs-agent   --detach=true   --volume=/var/run/docker.sock:/var/run/docker.sock   --volume=/var/log/ecs/:/log   --volume=/var/lib/ecs/data:/data   --net=host   --env=ECS_LOGLEVEL=debug   --env=ECS_CLUSTER=${module.ecs_cluster.cluster_name}   amazon/amazon-ecs-agent:latest >> /var/log/my-user-data.log 2>&1
+    echo "Done!" >> /var/log/my-user-data.log
     EOF
   )
   
@@ -254,4 +279,10 @@ module "autoscaling" {
 
 data "aws_ssm_parameter" "ecs_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
+         
+}
+
+output "image_id" {
+  value = data.aws_ssm_parameter.ecs_ami.value
+  sensitive = true
 }
