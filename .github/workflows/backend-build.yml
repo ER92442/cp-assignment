@@ -31,4 +31,6 @@ jobs:
           source service-version.sh
           echo "Building and pushing Docker image for backend"
           docker build -t ${{ secrets.DOCKER_USERNAME }}/backend:$BACKEND_VERSION . 
+          docker tag ${{ secrets.DOCKER_USERNAME }}/backend:$BACKEND_VERSION ${{ secrets.DOCKER_USERNAME }}/backend:latest
+          docker push ${{ secrets.DOCKER_USERNAME }}/backend:latest
           docker push ${{ secrets.DOCKER_USERNAME }}/backend:$BACKEND_VERSION
