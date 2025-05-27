@@ -1,0 +1,72 @@
+name: deploy Docker Images
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'services/api/service-version.sh'
+  workflow_dispatch:
+
+
+jobs:
+  terraform:
+    name: API image deploy
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: 'us-east-1'
+
+    - name: update task definition image
+      run: |
+        source services/api/service-version.sh
+        TASK_DEF_NAME="api"
+        NEW_IMAGE="er92442/backend:$API_VERSION"
+
+        printenv
+
+        # 1. Fetch the latest task definition and output it as JSON
+        aws ecs describe-task-definition \
+          --task-definition "$TASK_DEF_NAME" \
+          --query 'taskDefinition' > task-def.json
+
+        # 2. Use jq to modify just the image field in the container definition
+        jq --arg IMAGE "$NEW_IMAGE" '
+          .containerDefinitions[0].image = $IMAGE |
+          {
+            family,
+            taskRoleArn,
+            executionRoleArn,
+            networkMode,
+            containerDefinitions,
+            volumes,
+            placementConstraints,
+            requiresCompatibilities,
+            cpu,
+            memory,
+            ipcMode,
+            pidMode,
+            proxyConfiguration,
+            inferenceAccelerators,
+            ephemeralStorage
+          }' task-def.json > new-task-def.json
+
+        # 3. Register the new task definition revision
+        aws ecs register-task-definition \
+          --cli-input-json file://new-task-def.json
+
+        # 4. Update the service to use the new task definition revision
+        aws ecs update-service \
+          --cluster my-app \
+          --service api \
+          --task-definition "$TASK_DEF_NAME"
+
+
+
+

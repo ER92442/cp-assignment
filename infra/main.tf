@@ -1,9 +1,10 @@
+# add remote state configuration
 provider "aws" {
   region = var.region
 }
 
 resource "aws_sqs_queue" "email_queue" {
-  name = "email-queue"
+  name = var.queue_name
 }
 
 resource "aws_ssm_parameter" "auth_token" {
@@ -13,7 +14,7 @@ resource "aws_ssm_parameter" "auth_token" {
 }
 
 resource "aws_s3_bucket" "microservice_data" {
-  bucket = "microservice-data"
+  bucket = var.bucket_name
 }
 
 module "vpc" {
@@ -147,10 +148,10 @@ module "ecs_cluster" {
     ex_1 = {
       auto_scaling_group_arn = module.autoscaling["ex_1"].autoscaling_group_arn
       managed_scaling = {
-        maximum_scaling_step_size = 5
+        maximum_scaling_step_size = 1
         minimum_scaling_step_size = 1
         status                    = "ENABLED"
-        target_capacity           = 60
+        target_capacity           = 100 
       }
     }
   }
@@ -171,6 +172,7 @@ module "ecs_cluster" {
         {
           capacity_provider = "ex_1"
           weight            = 1
+          base              = 1
         }
       ]
       container_definitions = {
@@ -187,7 +189,7 @@ module "ecs_cluster" {
             },
             {
               name  = "S3_BUCKET_NAME"
-              value = aws_s3_bucket.microservice_data.bucket
+              value = var.bucket_name
             },
             {
               name  = "REGION"
@@ -253,7 +255,7 @@ module "ecs_cluster" {
           },
           {
             name  = "S3_BUCKET_NAME"
-            value = aws_s3_bucket.microservice_data.bucket
+            value = var.bucket_name
           },
           {
             name  = "REGION"
@@ -298,6 +300,7 @@ module "autoscaling" {
   min_size            = 1
   max_size            = 2
   desired_capacity    = 1
+  termination_policies = ["OldestInstance", "Default"]
 
   create_iam_instance_profile = true
   iam_role_name               = "ecs-instance-role-${each.key}"
@@ -338,34 +341,5 @@ module "autoscaling" {
 
 data "aws_ssm_parameter" "ecs_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
-
 }
 
-variable "region" {
-  description = "AWS region"
-  type        = string
-  default     = "us-east-1"
-}
-
-variable "instance_type" {
-  description = "EC2 instance type"
-  type        = string
-  default     = "t2.micro"
-}
-
-variable "backend_image" {
-  description = "Docker image for the backend service"
-  type        = string
-  default     = "er92442/backend:latest"
-}
-variable "api_image" {
-  description = "Docker image for the API service"
-  type        = string
-  default     = "er92442/api:latest"
-}
-
-variable "auth_token" {
-  description = "Authentication token for the API"
-  type        = string
-  default     = "$DJISA<$#45ex3RtYr"
-}
