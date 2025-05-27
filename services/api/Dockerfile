@@ -9,7 +9,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code main.py file
-COPY main.py ./app/
+COPY main.py .
 
 # Set environment variable to prevent bytecode .pyc files
 ENV PYTHONDONTWRITEBYTECODE=1
