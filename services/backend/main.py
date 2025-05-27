@@ -11,7 +11,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Configuration from environment variables
-SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL" , "https://sqs.us-east-1.amazonaws.com/293875060996/email-queue" )
+REGION = os.getenv("REGION" , "us-east-1")
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL" )
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "microservice-data")
 S3_UPLOAD_PATH = os.getenv("S3_UPLOAD_PATH", "uploads/")
 POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "10"))

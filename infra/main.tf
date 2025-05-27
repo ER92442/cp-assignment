@@ -1,5 +1,5 @@
 provider "aws" {
-  region = "us-east-1"
+  region = var.region
 }
 
 resource "aws_sqs_queue" "email_queue" {
@@ -9,7 +9,7 @@ resource "aws_sqs_queue" "email_queue" {
 resource "aws_ssm_parameter" "auth_token" {
   name  = "/auth/token"
   type  = "SecureString"
-  value = "$DJISA<$#45ex3RtYr"
+  value = var.auth_token
 }
 
 resource "aws_s3_bucket" "microservice_data" {
@@ -23,17 +23,17 @@ module "vpc" {
   name = "simple-vpc"
   cidr = "10.0.0.0/16"
 
-  azs             = ["us-east-1a" , "us-east-1b"]
-  public_subnets  = ["10.0.1.0/24", "10.0.2.0/24"]
+  azs            = ["us-east-1a", "us-east-1b"]
+  public_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
 
   enable_nat_gateway = false
   enable_vpn_gateway = false
-  create_igw = true 
-  
-  enable_dns_hostnames = true
-  enable_dns_support = true
+  create_igw         = true
+
+  enable_dns_hostnames    = true
+  enable_dns_support      = true
   map_public_ip_on_launch = true
-  
+
 }
 
 resource "aws_security_group" "elb_sg" {
@@ -42,19 +42,19 @@ resource "aws_security_group" "elb_sg" {
   vpc_id      = module.vpc.vpc_id
 
   ingress {
-    description      = "HTTP from anywhere"
-    from_port        = 80
-    to_port          = 80
-    protocol         = "tcp"
-    cidr_blocks      = ["0.0.0.0/0"] 
+    description = "HTTP from anywhere"
+    from_port   = 80
+    to_port     = 80
+    protocol    = "tcp"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 
   egress {
-    description      = "Allow all outbound traffic"
-    from_port        = 0
-    to_port          = 0
-    protocol         = "-1"
-    cidr_blocks      = ["0.0.0.0/0"]
+    description = "Allow all outbound traffic"
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
@@ -64,26 +64,26 @@ resource "aws_security_group" "ecs_sg" {
   vpc_id      = module.vpc.vpc_id
 
   ingress {
-    description = "Allow traffic from ELB on port 8000"
-    from_port   = 8000
-    to_port     = 8000
-    protocol    = "tcp"
+    description     = "Allow traffic from ELB on port 8000"
+    from_port       = 8000
+    to_port         = 8000
+    protocol        = "tcp"
     security_groups = [aws_security_group.elb_sg.id]
   }
 
   ingress {
-    description = "Allow traffic from ELB on port 80"
-    from_port   = 80
-    to_port     = 80
-    protocol    = "tcp"
+    description     = "Allow traffic from ELB on port 80"
+    from_port       = 80
+    to_port         = 80
+    protocol        = "tcp"
     security_groups = [aws_security_group.elb_sg.id]
   }
 
   ingress {
-    description = "Allow traffic from ELB on port 443"
-    from_port   = 443
-    to_port     = 443
-    protocol    = "tcp"
+    description     = "Allow traffic from ELB on port 443"
+    from_port       = 443
+    to_port         = 443
+    protocol        = "tcp"
     security_groups = [aws_security_group.elb_sg.id]
   }
 
@@ -114,10 +114,10 @@ resource "aws_security_group" "ecs_sg" {
 }
 
 resource "aws_elb" "main" {
-  name               = "simple-elb"
-  internal           = false
-  security_groups    = [aws_security_group.elb_sg.id]
-  subnets            = module.vpc.public_subnets
+  name            = "simple-elb"
+  internal        = false
+  security_groups = [aws_security_group.elb_sg.id]
+  subnets         = module.vpc.public_subnets
 
   listener {
     instance_port     = 8000
@@ -135,17 +135,17 @@ resource "aws_elb" "main" {
   }
 
   cross_zone_load_balancing = true
-  idle_timeout               = 60
+  idle_timeout              = 60
 }
 
 module "ecs_cluster" {
-  source = "terraform-aws-modules/ecs/aws"
-  cluster_name = "my-app"
+  source                                = "terraform-aws-modules/ecs/aws"
+  cluster_name                          = "my-app"
   default_capacity_provider_use_fargate = false
 
   autoscaling_capacity_providers = {
     ex_1 = {
-      auto_scaling_group_arn         = module.autoscaling["ex_1"].autoscaling_group_arn
+      auto_scaling_group_arn = module.autoscaling["ex_1"].autoscaling_group_arn
       managed_scaling = {
         maximum_scaling_step_size = 5
         minimum_scaling_step_size = 1
@@ -157,26 +157,47 @@ module "ecs_cluster" {
 
   services = {
     api = {
-      name = "api"
-      desired_count   = 1
-      launch_type     = "EC2" 
-      network_mode    = "bridge"
-      requires_compatibilities = ["EC2"] 
-      memory = 512
-      cpu    = 256
-      
+      name                     = "api"
+      desired_count            = 1
+      launch_type              = "EC2"
+      network_mode             = "bridge"
+      requires_compatibilities = ["EC2"]
+      memory                   = 512
+      cpu                      = 256
+
+
+
       capacity_provider_strategy = [
-      {
-        capacity_provider = "ex_1"
-        weight            = 1
-      }
+        {
+          capacity_provider = "ex_1"
+          weight            = 1
+        }
       ]
       container_definitions = {
         api = {
+          environment = [
+            {
+              name  = "SSM_PARAM_NAME"
+              value = aws_ssm_parameter.auth_token.name
+            },
+
+            {
+              name  = "SQS_QUEUE_URL"
+              value = aws_sqs_queue.email_queue.id
+            },
+            {
+              name  = "S3_BUCKET_NAME"
+              value = aws_s3_bucket.microservice_data.bucket
+            },
+            {
+              name  = "REGION"
+              value = var.region
+            }
+          ]
           network_mode = "bridge"
-          image     = "er92442/api:latest"
-          cpu       = 256
-          essential = true
+          image        = var.api_image
+          cpu          = 256
+          essential    = true
           port_mappings = [
             {
               name          = "api"
@@ -190,50 +211,68 @@ module "ecs_cluster" {
       }
       load_balancer = {
         service = {
-          container_name   = "api"
-          container_port   = 8000
-          elb_name         = aws_elb.main.name
+          container_name = "api"
+          container_port = 8000
+          elb_name       = aws_elb.main.name
         }
       }
 
       tasks_iam_role_name        = "api-task-iam-role"
       tasks_iam_role_description = "tasks IAM role for ECS"
       tasks_iam_role_policies = {
-        AmazonSQSFullAccess = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+        AmazonSQSFullAccess     = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
         AmazonSSMReadOnlyAccess = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
       }
       subnet_ids = module.vpc.public_subnets
     }
     backend = {
-      name = "backend"
-      desired_count   = 1
-      launch_type     = "EC2" 
-      network_mode    = "bridge"
-      requires_compatibilities = ["EC2"] 
-      memory = 512
-      cpu    = 256
-      
+      name                     = "backend"
+      desired_count            = 1
+      launch_type              = "EC2"
+      network_mode             = "bridge"
+      requires_compatibilities = ["EC2"]
+      memory                   = 512
+      cpu                      = 256
+
       capacity_provider_strategy = [
-      {
-        capacity_provider = "ex_1"
-        weight            = 1
-      }
+        {
+          capacity_provider = "ex_1"
+          weight            = 1
+        }
       ]
       container_definitions = {
-        backend = {
-          network_mode = "bridge"
-          image     = "er92442/backend:latest"
-          cpu       = 256
-          essential = true 
+
+        backend = { environment = [
+          {
+            name  = "SSM_PARAM_NAME"
+            value = aws_ssm_parameter.auth_token.name
+          },
+          {
+            name  = "SQS_QUEUE_URL"
+            value = aws_sqs_queue.email_queue.id
+          },
+          {
+            name  = "S3_BUCKET_NAME"
+            value = aws_s3_bucket.microservice_data.bucket
+          },
+          {
+            name  = "REGION"
+            value = var.region
+          }
+          ]
+          image                     = var.backend_image
+          network_mode              = "bridge"
+          image                     = var.backend_image
+          cpu                       = 256
+          essential                 = true
           enable_cloudwatch_logging = true
-          image_pull_policy = "Always"
-        }
+        image_pull_policy = "Always" }
       }
 
-      tasks_iam_role_name        = "backend-task-iam-role"
+      tasks_iam_role_name = "backend-task-iam-role"
       tasks_iam_role_policies = {
         AmazonSQSFullAccess = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
-        AmazonS3FullAccess = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        AmazonS3FullAccess  = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
       }
       subnet_ids = module.vpc.public_subnets
     }
@@ -246,14 +285,14 @@ module "autoscaling" {
   version = "~> 8.0"
   for_each = {
     ex_1 = {
-      instance_type              = "t2.micro"
+      instance_type              = var.instance_type
       use_mixed_instances_policy = false
       mixed_instances_policy     = {}
     }
   }
-  name = "autoscaling-group-${each.key}"
-  image_id = "ami-03afdcc08c89cd0b8" #data.aws_ssm_parameter.ecs_ami.value
-  instance_type = each.value.instance_type
+  name                = "autoscaling-group-${each.key}"
+  image_id            = "ami-03afdcc08c89cd0b8" #data.aws_ssm_parameter.ecs_ami.value
+  instance_type       = each.value.instance_type
   vpc_zone_identifier = module.vpc.public_subnets
   health_check_type   = "EC2"
   min_size            = 1
@@ -262,7 +301,7 @@ module "autoscaling" {
 
   create_iam_instance_profile = true
   iam_role_name               = "ecs-instance-role-${each.key}"
-  
+
   user_data = base64encode(<<-EOF
     #!/bin/bash
     echo "Starting ECS Agent setup..." >> /var/log/my-user-data.log
@@ -277,7 +316,7 @@ module "autoscaling" {
     echo "Done!" >> /var/log/my-user-data.log
     EOF
   )
-  
+
   iam_role_policies = {
     AmazonEC2ContainerServiceforEC2Role = "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
     AmazonSSMManagedInstanceCore        = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
@@ -285,8 +324,8 @@ module "autoscaling" {
     AmazonSQSFullAccess                 = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
     SecretsManagerReadWrite             = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
   }
-  
-  
+
+
   network_interfaces = [
     {
       delete_on_termination       = true
@@ -299,5 +338,34 @@ module "autoscaling" {
 
 data "aws_ssm_parameter" "ecs_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
-         
+
+}
+
+variable "region" {
+  description = "AWS region"
+  type        = string
+  default     = "us-east-1"
+}
+
+variable "instance_type" {
+  description = "EC2 instance type"
+  type        = string
+  default     = "t2.micro"
+}
+
+variable "backend_image" {
+  description = "Docker image for the backend service"
+  type        = string
+  default     = "er92442/backend:latest"
+}
+variable "api_image" {
+  description = "Docker image for the API service"
+  type        = string
+  default     = "er92442/api:latest"
+}
+
+variable "auth_token" {
+  description = "Authentication token for the API"
+  type        = string
+  default     = "$DJISA<$#45ex3RtYr"
 }

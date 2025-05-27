@@ -8,13 +8,17 @@ print("Starting FastAPI application...")
 # Initialize FastAPI
 app = FastAPI()
 
-# Boto3 clients
-ssm_client = boto3.client('ssm', region_name='us-east-1')
-sqs_client = boto3.client('sqs', region_name='us-east-1')
 
 # Environment variables
-SSM_PARAM_NAME = os.getenv("SSM_PARAM_NAME", "/auth/token")
-SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL", "https://sqs.us-east-1.amazonaws.com/293875060996/email-queue")
+REGION = os.getenv("REGION" , "us-east-1")
+SSM_PARAM_NAME = os.getenv("SSM_PARAM_NAME")
+SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
+
+# Boto3 clients
+ssm_client = boto3.client('ssm', region_name=REGION)
+sqs_client = boto3.client('sqs', region_name=REGION)
+
+
 
 # Pydantic models
 class EmailData(BaseModel):
