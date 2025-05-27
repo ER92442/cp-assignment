@@ -128,7 +128,7 @@ resource "aws_elb" "main" {
 
   health_check {
     target              = "HTTP:8000/health"
-    interval            = 30
+    interval            = 90
     timeout             = 60
     healthy_threshold   = 3
     unhealthy_threshold = 3
@@ -146,14 +146,6 @@ module "ecs_cluster" {
   source = "terraform-aws-modules/ecs/aws"
   cluster_name = "my-app"
   default_capacity_provider_use_fargate = false
-  # create_task_exec_iam_role = true
-  # task_exec_iam_role_name = "ecs-task-execution-role"
-  # task_exec_iam_role_policies = {
-  #   AmazonECSTaskExecutionRolePolicy = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-  #   AmazonS3FullAccess                = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-  #   AmazonSQSFullAccess               = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
-  #   SecretsManagerReadWrite           = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
-  # }
 
 
   autoscaling_capacity_providers = {
@@ -209,18 +201,30 @@ module "ecs_cluster" {
         }
       }
 
-      # create iam role for ECS tasks
-      task_role_policies = {
+      tasks_iam_role_name        = "task-iam-role"
+      tasks_iam_role_description = "tasks IAM role for ECS"
+      tasks_iam_role_policies = {
         AmazonSQSFullAccess = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
-        AmazonS3FullAccess  = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
-        SecretsManagerReadWrite = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
+        AmazonSSMReadOnlyAccess = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
       }
-      task_role_name = "ecs-task-role-api"
-      task_execution_role_name = "ecs-task-execution-role-api"
+      tasks_iam_role_statements = [
+        {
+          effect    = "Allow"
+          actions   = ["ssm:GetParametersByPath"]
+          resources = [aws_ssm_parameter.auth_token.arn]
+        }
+      ]
+
+      #maybe
+      task_exec_iam_role_name = "my-task-exec-role"
+      task_exec_iam_role_policies = {
+        ssm = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
+      }
       subnet_ids = module.vpc.public_subnets
     }
   }
 }
+
 
 module "autoscaling" {
   source  = "terraform-aws-modules/autoscaling/aws"
@@ -238,7 +242,7 @@ module "autoscaling" {
   vpc_zone_identifier = module.vpc.public_subnets
   health_check_type   = "EC2"
   min_size            = 1
-  max_size            = 3
+  max_size            = 2
   desired_capacity    = 1
 
   create_iam_instance_profile = true
@@ -266,6 +270,7 @@ module "autoscaling" {
     AmazonSQSFullAccess                 = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
     SecretsManagerReadWrite             = "arn:aws:iam::aws:policy/SecretsManagerReadWrite"
   }
+  
   
   network_interfaces = [
     {
