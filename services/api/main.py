@@ -9,16 +9,13 @@ print("Starting FastAPI application...")
 app = FastAPI()
 
 
-# Environment variables
 REGION = os.getenv("REGION" , "us-east-1")
 SSM_PARAM_NAME = os.getenv("SSM_PARAM_NAME")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 
-# Boto3 clients
 ssm_client = boto3.client('ssm', region_name=REGION)
 sqs_client = boto3.client('sqs', region_name=REGION)
 
-# Pydantic models
 class EmailData(BaseModel):
     email_subject: str
     email_sender: str
@@ -29,7 +26,6 @@ class EmailRequest(BaseModel):
     data: EmailData
     token: str
 
-# Helper: Validate timestamp
 def is_valid_timestream(ts: str) -> bool:
     try:
         dt = datetime.utcfromtimestamp(int(ts))
