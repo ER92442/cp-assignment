@@ -226,6 +226,7 @@ module "ecs_cluster" {
           cpu       = 256
           essential = true 
           enable_cloudwatch_logging = true
+          image_pull_policy = "Always"
         }
       }
 
