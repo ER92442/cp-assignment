@@ -41,7 +41,7 @@ def get_valid_token() -> str:
     return response['Parameter']['Value']
 
 # Main route
-@app.post("/send")
+@app.post("/")
 async def receive_email(req: EmailRequest):
     print("Received request:", req)
     # Step 1: Validate token
