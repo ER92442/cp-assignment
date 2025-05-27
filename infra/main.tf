@@ -136,17 +136,12 @@ resource "aws_elb" "main" {
 
   cross_zone_load_balancing = true
   idle_timeout               = 60
-
-  tags = {
-    Name = "simple-elb"
-  }
 }
 
 module "ecs_cluster" {
   source = "terraform-aws-modules/ecs/aws"
   cluster_name = "my-app"
   default_capacity_provider_use_fargate = false
-
 
   autoscaling_capacity_providers = {
     ex_1 = {
@@ -201,24 +196,43 @@ module "ecs_cluster" {
         }
       }
 
-      tasks_iam_role_name        = "task-iam-role"
+      tasks_iam_role_name        = "api-task-iam-role"
       tasks_iam_role_description = "tasks IAM role for ECS"
       tasks_iam_role_policies = {
         AmazonSQSFullAccess = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
         AmazonSSMReadOnlyAccess = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
       }
-      tasks_iam_role_statements = [
-        {
-          effect    = "Allow"
-          actions   = ["ssm:GetParametersByPath"]
-          resources = [aws_ssm_parameter.auth_token.arn]
-        }
+      subnet_ids = module.vpc.public_subnets
+    }
+    backend = {
+      name = "backend"
+      desired_count   = 1
+      launch_type     = "EC2" 
+      network_mode    = "bridge"
+      requires_compatibilities = ["EC2"] 
+      memory = 512
+      cpu    = 256
+      
+      capacity_provider_strategy = [
+      {
+        capacity_provider = "ex_1"
+        weight            = 1
+      }
       ]
+      container_definitions = {
+        backend = {
+          network_mode = "bridge"
+          image     = "er92442/backend:latest"
+          cpu       = 256
+          essential = true 
+          enable_cloudwatch_logging = true
+        }
+      }
 
-      #maybe
-      task_exec_iam_role_name = "my-task-exec-role"
-      task_exec_iam_role_policies = {
-        ssm = "arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess"
+      tasks_iam_role_name        = "backend-task-iam-role"
+      tasks_iam_role_policies = {
+        AmazonSQSFullAccess = "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
+        AmazonS3FullAccess = "arn:aws:iam::aws:policy/AmazonS3FullAccess"
       }
       subnet_ids = module.vpc.public_subnets
     }
@@ -285,9 +299,4 @@ module "autoscaling" {
 data "aws_ssm_parameter" "ecs_ami" {
   name = "/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id"
          
-}
-
-output "image_id" {
-  value = data.aws_ssm_parameter.ecs_ami.value
-  sensitive = true
 }
