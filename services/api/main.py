@@ -18,8 +18,6 @@ SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 ssm_client = boto3.client('ssm', region_name=REGION)
 sqs_client = boto3.client('sqs', region_name=REGION)
 
-
-
 # Pydantic models
 class EmailData(BaseModel):
     email_subject: str
