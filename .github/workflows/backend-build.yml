@@ -1,4 +1,4 @@
-name: Build and Push backend Docker Image
+name: Build and Push Backend Service Docker Image
 
 on:
   push:
@@ -27,9 +27,8 @@ jobs:
 
       - name: Build and Push Docker Image
         run: |
-          cd /services/backend
-          source ./services/backend/service-version.sh
+          cd services/backend
+          source service-version.sh
           echo "Building and pushing Docker image for backend"
           docker build -t ${{ secrets.DOCKER_USERNAME }}/backend:$BACKEND_VERSION . 
           docker push ${{ secrets.DOCKER_USERNAME }}/backend:$BACKEND_VERSION
-          fi
